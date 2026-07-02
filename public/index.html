@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PumpSathi — Fuel Station Operations</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Login -->
+<div class="auth-overlay" id="authOverlay">
+  <form class="auth-card" id="loginForm">
+    <div class="logo" id="loginLogo">PS</div>
+    <h2 id="loginTitle">PumpSathi</h2>
+    <p id="loginTag">Your fuel-station companion — sign in to continue</p>
+    <div class="field"><label>Mobile number</label><input type="tel" id="loginUser" inputmode="numeric" autocomplete="username" placeholder="10-digit mobile" autofocus></div>
+    <div class="field"><label>Password</label><input type="password" id="loginPass" autocomplete="current-password"></div>
+    <div class="auth-err" id="loginErr"></div>
+    <button class="btn primary" type="submit" style="width:100%;justify-content:center">Sign in</button>
+  </form>
+</div>
+
+<!-- App -->
+<div class="app" id="appRoot" style="display:none">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo" id="navLogo">PS</div>
+      <div>
+        <div class="bt" id="brandName">PumpSathi</div>
+        <div class="bs" id="brandSub">Fuel Station Operations</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="foot">
+      <button class="btn sm ghost" onclick="App.exportData()">⬇ Backup (JSON)</button>
+      <button class="btn sm ghost" onclick="document.getElementById('importFile').click()">⬆ Restore</button>
+      <input type="file" id="importFile" accept=".json" hidden onchange="App.importData(event)">
+      <button class="btn sm danger" onclick="App.clearData()">↺ Clear all data</button>
+      <button class="btn sm ghost" onclick="API.logout()">⎋ Sign out</button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <h1 id="viewTitle">Dashboard</h1>
+        <div class="sub" id="viewSub"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div id="topActions" style="display:flex;gap:8px"></div>
+        <div class="user-chip" id="userChip"></div>
+      </div>
+    </div>
+    <div class="content" id="view"></div>
+  </div>
+</div>
+
+<div class="modal-back" id="modalBack">
+  <div class="modal" id="modalBox">
+    <header><h3 id="modalTitle">Edit</h3><button class="icon-btn" onclick="App.closeModal()">✕</button></header>
+    <div class="body" id="modalBody"></div>
+    <footer>
+      <button class="btn ghost" onclick="App.closeModal()">Cancel</button>
+      <button class="btn primary" id="modalSave">Save</button>
+    </footer>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="api.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
