@@ -19,3 +19,9 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Always revalidate the SPA assets so a new deploy shows immediately (no stale cache)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
