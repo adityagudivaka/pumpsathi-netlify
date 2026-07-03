@@ -3,3 +3,6 @@ node_modules/
 *.log
 .env
 netlify-import.env
+test-rbac.js
+test-local.js
+dev-local.js

@@ -34,8 +34,21 @@ function normalize(st) {
   st.attendance = st.attendance || {};
   st.alerts = st.alerts || { enabled: true, recipients: [], types: { dailySales: { on: true, time: '21:30' }, compliance: { on: true, daysAhead: 30 }, outstandingCredit: { on: true, threshold: 0 }, weeklyAttendance: { on: true, weekday: 1 } } };
   st.firms = st.firms || null;
+  st.permissions = st.permissions || { edit: [], view: [] };
+  st.roles = st.roles || [{ v: 'admin', t: 'Pump Admin' }, { v: 'staff', t: 'Staff' }];
   return st;
 }
+
+/* ---------- role / area helpers ---------- */
+const AREA_OF_VIEW = {
+  dashboard: null, sales: 'sales', prices: 'sales', shifts: 'shifts', stock: 'stock', purchases: 'stock',
+  cash: 'cash', credit: 'credit', oils: 'stock', expenses: 'expenses', tanker: 'stock',
+  attendance: 'attendance', compliance: 'compliance', alerts: 'alerts', audit: 'audit', setup: 'setup',
+};
+function isOwner() { return S.user && S.user.role === 'owner'; }
+function canEditArea(area) { if (!area) return true; if (isOwner()) return true; return (S.permissions.edit || []).includes(area); }
+function canViewArea(area) { if (!area) return true; if (isOwner()) return true; return (S.permissions.view || []).includes(area) || canEditArea(area); }
+function roleLabel(r) { const f = (S.roles || []).find(x => x.v === r); return f ? f.t : r; }
 
 /* ============================================================
    DOMAIN COMPUTATIONS
@@ -183,6 +196,7 @@ const VIEWS = [
   { id: 'dashboard', ic: '▦', label: 'Dashboard', sub: 'Live snapshot, monthly P&L and 3-month comparison' },
   { grp: 'Daily operations' },
   { id: 'sales', ic: '⛽', label: 'Daily Sales', sub: 'Pump-boy settlement + daily Consolidated Report' },
+  { id: 'shifts', ic: '🕐', label: 'Shifts', sub: 'Open & close shifts, cash handover and variance' },
   { id: 'prices', ic: '₹', label: 'Fuel Prices', sub: 'Effective selling price log (MS / HSD)' },
   { id: 'stock', ic: '🛢', label: 'Fuel Stock & Recon', sub: 'Wet-stock reconciliation (the audit core)' },
   { id: 'purchases', ic: '🚚', label: 'Fuel Purchases', sub: 'Tanker decantation log' },
@@ -197,14 +211,19 @@ const VIEWS = [
   { id: 'compliance', ic: '🛡', label: 'Compliance', sub: 'Licences, W&M stamping, expiry alerts' },
   { grp: 'Automation' },
   { id: 'alerts', ic: '🔔', label: 'WhatsApp Alerts', sub: 'Auto-send reports & reminders to WhatsApp' },
+  { grp: 'Accountability' },
+  { id: 'audit', ic: '📜', label: 'Audit Log', sub: 'Who changed what, and when' },
   { grp: 'Configuration' },
-  { id: 'setup', ic: '⚙', label: 'Setup / Master Data', sub: 'Station, products, pumps, staff, customers, firms, users' },
+  { id: 'setup', ic: '⚙', label: 'Setup / Master Data', sub: 'Station, products, pumps, staff, customers, pumps, users' },
 ];
 let current = 'dashboard';
 function buildNav() {
   const nav = $('#nav'); nav.innerHTML = '';
+  let pendingGrp = null;
   for (const v of VIEWS) {
-    if (v.grp) { nav.appendChild(el('div', { class: 'grp' }, v.grp)); continue; }
+    if (v.grp) { pendingGrp = v.grp; continue; }
+    if (!canViewArea(AREA_OF_VIEW[v.id])) continue;
+    if (pendingGrp) { nav.appendChild(el('div', { class: 'grp' }, pendingGrp)); pendingGrp = null; }
     const b = el('button', { class: v.id === current ? 'active' : '' });
     b.innerHTML = `<span class="ic">${v.ic}</span><span>${v.label}</span>`;
     b.onclick = () => go(v.id); nav.appendChild(b);
@@ -212,19 +231,33 @@ function buildNav() {
 }
 function go(id) { current = id; buildNav(); render(); window.scrollTo(0, 0); }
 function render() {
+  // if the role can't view the current area, fall back to dashboard
+  if (!canViewArea(AREA_OF_VIEW[current])) current = 'dashboard';
   const v = VIEWS.find(x => x.id === current);
+  S._area = AREA_OF_VIEW[current];
   $('#viewTitle').textContent = v.label; $('#viewSub').textContent = v.sub || '';
   $('#topActions').innerHTML = '';
   $('#brandName').textContent = (S.user && S.user.firmName) || S.station.name || (S.appName || 'PumpSathi');
   $('#brandSub').textContent = S.appName || 'PumpSathi';
+  // banners live in a persistent container the RENDER functions don't clear
+  let banner = $('#banner');
+  if (!banner) { banner = el('div', { id: 'banner' }); const view = $('#view'); view.parentNode.insertBefore(banner, view); }
+  banner.innerHTML = '';
+  if (S.user && S.user.sup) banner.appendChild(impersonationBanner());
+  if (S._area && !canEditArea(S._area)) banner.appendChild(el('div', { class: 'offline-banner show', style: 'background:rgba(245,165,36,.14);border-color:rgba(245,165,36,.4);color:#ffcf7a' }, '👁 View-only — your role (' + roleLabel(S.user.role) + ') can view this but not edit it.'));
   RENDER[current]();
+}
+function impersonationBanner() {
+  const d = el('div', { class: 'offline-banner show', style: 'background:rgba(61,125,255,.14);border-color:rgba(61,125,255,.45);color:#8fb4ff;display:flex;justify-content:space-between;align-items:center;gap:12px' });
+  d.innerHTML = `<span>🛟 Support mode — you are viewing <b>${esc(S.user.firmName || 'another pump')}</b>.</span>`;
+  const b = el('button', { class: 'btn sm' }, 'Exit to my pump'); b.onclick = exitImpersonation; d.appendChild(b); return d;
 }
 
 /* ============================================================
    UI PRIMITIVES
    ============================================================ */
 function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 2200); }
-function topBtn(label, fn, cls = 'primary') { const b = el('button', { class: 'btn ' + cls }, label); b.onclick = fn; $('#topActions').appendChild(b); }
+function topBtn(label, fn, cls = 'primary') { if (!canEditArea(S._area)) return; const b = el('button', { class: 'btn ' + cls }, label); b.onclick = fn; $('#topActions').appendChild(b); }
 function subtabs(tabs, active, onChange) { const w = el('div', { class: 'subtabs' }); tabs.forEach(t => { const b = el('button', { class: t === active ? 'active' : '' }, t); b.onclick = () => onChange(t); w.appendChild(b); }); return w; }
 function selField(label, options, value, onChange) {
   const f = el('div', { class: 'field' }); f.appendChild(el('label', {}, label));
@@ -250,6 +283,8 @@ function bucketsBetween(from, to, gran) {
 }
 
 function table(cols, rows, opts = {}) {
+  // hide row actions where the current area is read-only for this role
+  if (opts.actions && !canEditArea(S._area)) { opts = { ...opts, onEdit: null, onDelete: null }; }
   const wrap = el('div', { class: 'tbl-wrap' });
   if (!rows.length) { wrap.appendChild(el('div', { class: 'empty' }, opts.empty || 'No records yet. Click “Add” to create one.')); return wrap; }
   const t = el('table'); const thead = el('thead'); const tr = el('tr');
@@ -376,6 +411,40 @@ RENDER.dashboard = function () {
     ${kpi('Oil Stock Value', rupee(oilRollup().reduce((a, b) => a + b.stockVal, 0)), 'inventory at price')}
     ${kpi('Staff on Roll', S.staff.filter(s => s.status === 'Active').length, 'active employees')}`;
   v.appendChild(kp);
+
+  /* ---- Today at the pump ---- */
+  const dts = [...new Set(S.dailySales.map(r => r.date))].sort();
+  const day = S._dashDay || (dts.includes(todayISO()) ? todayISO() : (dts[dts.length - 1] || todayISO()));
+  const dRows = salesOnDate(day), dAgg = aggSales(dRows);
+  const dCredit = round2(S.credit.filter(x => x.date === day).reduce((a, b) => a + num(b.given), 0));
+  const today = el('div', { class: 'card', style: 'margin-top:18px' });
+  today.appendChild(el('div', { class: 'card-head', html: `<h3>Today at the pump</h3><span class="tag">${day}</span>` }));
+  const dbar = el('div', { class: 'filters' });
+  dbar.appendChild(dateField('Day', day, val => { S._dashDay = val; render(); }));
+  today.appendChild(dbar);
+  today.innerHTML += `<div class="mini">
+    <div class="stat"><div class="l">Day fuel sale</div><div class="v">${rupee(dAgg.net)}</div></div>
+    <div class="stat"><div class="l">MS / HSD litres</div><div class="v">${fmt(dAgg.ms)} / ${fmt(dAgg.hsd)}</div></div>
+    <div class="stat"><div class="l">Cash collected</div><div class="v">${rupee(dAgg.cash)}</div></div>
+    <div class="stat"><div class="l">Digital</div><div class="v">${rupee(dAgg.digital)}</div></div>
+    <div class="stat"><div class="l">Credit given</div><div class="v">${rupee(dCredit)}</div></div></div>`;
+  // low-stock alerts (latest physical dip vs reorder level)
+  const reorder = { MS: num(S.settings.reorderMS) || 2000, HSD: num(S.settings.reorderHSD) || 2000 };
+  const lowMsgs = [];
+  ['MS', 'HSD'].forEach(p => { const rec = stockRecon(p).filter(x => x.phys != null).slice(-1)[0]; if (rec && rec.phys < reorder[p]) lowMsgs.push(`${p === 'MS' ? 'MS Petrol' : 'HSD Diesel'} low: ${fmt(rec.phys)} L (reorder ≤ ${fmt(reorder[p])} L)`); });
+  if (lowMsgs.length) today.appendChild(el('div', { class: 'offline-banner show', style: 'margin-top:12px', html: '⚠ ' + lowMsgs.join(' &nbsp;·&nbsp; ') }));
+  // nozzle-wise + shift summary
+  const nozzleRow = el('div', { class: 'grid two-col', style: 'margin-top:14px' });
+  const byPump = {}; dRows.forEach(r => { const c = calcSale(r); const k = r.pump || '—'; (byPump[k] = byPump[k] || { pump: k, prod: r.prod, litres: 0, amt: 0 }); byPump[k].litres += c.netL; byPump[k].amt += c.netAmt; });
+  const nz = el('div', { class: 'card' }); nz.innerHTML = `<div class="card-head"><h3>Nozzle-wise sales</h3></div>`;
+  nz.appendChild(table([{ label: 'Pump', val: r => r.pump }, { label: 'Fuel', val: r => r.prod }, { label: 'Litres', num: true, val: r => fmt(r.litres, 1) }, { label: 'Sale ₹', num: true, val: r => fmt(r.amt) }], Object.values(byPump).sort((a, b) => b.amt - a.amt), { empty: 'No sales entered for this day.' }));
+  nozzleRow.appendChild(nz);
+  const shiftsToday = S.shifts.filter(s => s.date === day);
+  const sh = el('div', { class: 'card' }); sh.innerHTML = `<div class="card-head"><h3>Shift summary</h3></div>`;
+  sh.appendChild(table([{ label: 'Shift', val: r => r.name }, { label: 'Staff', val: r => r.staff || '—' }, { label: 'Closing ₹', num: true, val: r => r.status === 'Closed' ? fmt(r.closingCash) : '—' }, { label: 'Variance', num: true, val: r => r.status === 'Closed' ? `<span class="pill ${Math.abs(shiftVariance(r)) > 100 ? 'due' : 'ok'}">${fmt(shiftVariance(r))}</span>` : '<span class="pill due">Open</span>', html: true }], shiftsToday, { empty: 'No shifts logged for this day.' }));
+  nozzleRow.appendChild(sh);
+  today.appendChild(nozzleRow);
+  v.appendChild(today);
 
   const dataDates = S.dailySales.map(r => r.date).filter(Boolean).sort();
   const minD = dataDates[0] || (mk + '-01'), maxD = dataDates[dataDates.length - 1] || todayISO();
@@ -815,6 +884,64 @@ function editCompliance(r) {
   ], async d => { const rec = { item: d.item, authority: d.authority, number: d.number, issue: d.issue, expiry: d.expiry }; if (r) await dbUpdate('compliance', r.id, rec); else await dbCreate('compliance', rec); toast('Saved'); });
 }
 
+/* ---------- Shifts ---------- */
+function shiftVariance(r) { return round2(num(r.closingCash) - (num(r.openingCash) + num(r.cashSales))); }
+RENDER.shifts = function () {
+  topBtn('+ Open shift', () => editShift());
+  const v = $('#view'); v.innerHTML = '';
+  v.appendChild(el('div', { class: 'hint', style: 'margin-bottom:12px', html: 'Open a shift with the cash float, then close it with the counted cash. Variance = Closing − (Opening + Cash sales).' }));
+  const rows = [...S.shifts].sort((a, b) => (b.date + (b.openTime || '')).localeCompare(a.date + (a.openTime || '')));
+  v.appendChild(table([
+    { label: 'Date', val: r => r.date }, { label: 'Shift', val: r => r.name }, { label: 'Staff', val: r => r.staff || '—' },
+    { label: 'Open', val: r => r.openTime || '—' }, { label: 'Close', val: r => r.closeTime || '—' },
+    { label: 'Opening ₹', num: true, val: r => fmt(r.openingCash) }, { label: 'Cash sales ₹', num: true, val: r => fmt(r.cashSales) }, { label: 'Closing ₹', num: true, val: r => fmt(r.closingCash) },
+    { label: 'Variance ₹', num: true, calc: true, val: r => r.status === 'Closed' ? `<span class="pill ${Math.abs(shiftVariance(r)) > 100 ? 'due' : 'ok'}">${fmt(shiftVariance(r))}</span>` : '—', html: true },
+    { label: 'Status', val: r => `<span class="pill ${r.status === 'Closed' ? 'ok' : 'due'}">${r.status || 'Open'}</span>`, html: true },
+  ], rows, { actions: true, onEdit: editShift, onDelete: r => confirmDel('Delete this shift?', () => dbDelete('shifts', r.id)) }));
+};
+function editShift(r) {
+  const staff = S.staff.map(s => s.name);
+  const now = new Date().toTimeString().slice(0, 5);
+  openForm(r ? 'Edit / close shift' : 'Open shift', [
+    { key: 'date', label: 'Date', type: 'date', value: r ? r.date : todayISO() },
+    { key: 'name', label: 'Shift', type: 'select', options: ['Morning', 'Evening', 'Night'], value: r ? r.name : 'Morning' },
+    { key: 'staff', label: 'In charge', type: 'select', options: staff, value: r ? r.staff : staff[0] },
+    { key: 'openTime', label: 'Open time', type: 'time', value: r ? r.openTime : now },
+    { key: 'openingCash', label: 'Opening cash float ₹', type: 'number', value: r ? r.openingCash : 0 },
+    { type: 'hr', label: 'Close (fill when shift ends)' },
+    { key: 'cashSales', label: 'Cash sales during shift ₹', type: 'number', value: r ? r.cashSales : 0 },
+    { key: 'closeTime', label: 'Close time', type: 'time', value: r ? r.closeTime : '' },
+    { key: 'closingCash', label: 'Counted closing cash ₹', type: 'number', value: r ? r.closingCash : '' },
+    { key: 'notes', label: 'Notes', type: 'text', value: r ? r.notes : '', wide: true },
+  ], async d => {
+    const status = (d.closeTime || d.closingCash !== '') ? 'Closed' : 'Open';
+    const rec = { date: d.date, name: d.name, staff: d.staff, openTime: d.openTime, closeTime: d.closeTime, openingCash: num(d.openingCash), cashSales: num(d.cashSales), closingCash: d.closingCash === '' ? '' : num(d.closingCash), notes: d.notes, status };
+    if (r) await dbUpdate('shifts', r.id, rec); else await dbCreate('shifts', rec); toast('Saved');
+  });
+}
+
+/* ---------- Audit Log ---------- */
+RENDER.audit = function () {
+  const v = $('#view'); v.innerHTML = '';
+  v.appendChild(el('div', { class: 'hint', style: 'margin-bottom:12px', html: 'Every create / edit / delete, user &amp; pump change, backup restore and data clear is recorded here.' }));
+  const box = el('div', {}, '<div class="hint">Loading…</div>'); v.appendChild(box);
+  API.audit().then(rows => {
+    box.innerHTML = '';
+    box.appendChild(table([
+      { label: 'When', val: r => new Date(r.ts).toLocaleString('en-IN') },
+      { label: 'Who', val: r => r.actor || '—' },
+      { label: 'Action', val: r => r.action },
+      { label: 'Area', val: r => r.area || '—' },
+    ], rows, { empty: 'No activity recorded yet.' }));
+  }).catch(e => { box.innerHTML = ''; box.appendChild(el('div', { class: 'empty' }, e.message)); });
+};
+
+async function exitImpersonation() {
+  const home = localStorage.getItem('afs_home_token');
+  if (home) { API.token = home; localStorage.setItem('afs_token', home); localStorage.removeItem('afs_home_token'); }
+  S._setupTab = 'Pumps'; current = 'setup'; await boot();
+}
+
 /* ---------- WhatsApp Alerts ---------- */
 async function saveAlerts() { try { await saveKV('alerts'); } catch (e) { alert(e.message); } }
 RENDER.alerts = function () {
@@ -914,9 +1041,9 @@ RENDER.setup = function () {
   const v = $('#view'); v.innerHTML = '';
   const tab = S._setupTab || 'Station';
   const role = (S.user || API.user || {}).role;
-  const tabs = ['Station', 'Products', 'Pumps', 'Staff', 'Customers', 'Categories', 'Payroll'];
+  const tabs = ['Station', 'Products', 'Nozzles', 'Staff', 'Customers', 'Categories', 'Payroll'];
   if (role === 'owner' || role === 'admin') tabs.push('Users');
-  if (role === 'owner') tabs.push('Firms');
+  if (role === 'owner') tabs.push('Pumps');
   v.appendChild(subtabs(tabs, tab, t => { S._setupTab = t; render(); }));
 
   if (tab === 'Station') {
@@ -934,7 +1061,7 @@ RENDER.setup = function () {
   } else if (tab === 'Products') {
     topBtn('+ Add product', () => editProduct());
     v.appendChild(table([{ label: 'Code', val: r => r.code }, { label: 'Product', val: r => r.name }, { label: 'Unit price ₹/L', num: true, val: r => fmt(r.price, 2) }, { label: 'Cost ₹/L', num: true, val: r => fmt(r.cost, 2) }, { label: 'Margin ₹/L', num: true, calc: true, val: r => fmt(round2(num(r.price) - num(r.cost)), 2) }, { label: 'Tanks', val: r => r.tanks }], S.products, { actions: true, onEdit: editProduct, onDelete: r => confirmDel('Delete product?', () => dbDelete('products', r.id)) }));
-  } else if (tab === 'Pumps') {
+  } else if (tab === 'Nozzles') {
     topBtn('+ Add nozzle', () => editNozzle());
     v.appendChild(table([{ label: 'Dispenser', val: r => r.dispenser }, { label: 'Nozzle', val: r => r.nozzle }, { label: 'Product', val: r => `<span class="pill ${r.product === 'MS' ? 'ms' : 'hsd'}">${r.product}</span>`, html: true }], S.nozzles, { actions: true, onEdit: editNozzle, onDelete: r => confirmDel('Delete nozzle?', () => dbDelete('nozzles', r.id)) }));
   } else if (tab === 'Staff') {
@@ -952,33 +1079,60 @@ RENDER.setup = function () {
     [['standardDays', 'Standard days / month'], ['otRate', 'OT rate ₹/hour'], ['hoursPerDay', 'Working hours / day']].forEach(([k, l]) => { const f = el('div', { class: 'field' }); f.appendChild(el('label', {}, l)); const i = el('input', { type: 'number', value: S.payroll[k] }); i.onchange = async () => { S.payroll[k] = num(i.value); try { await saveKV('payroll'); toast('Saved'); } catch (e) { } }; f.appendChild(i); g.appendChild(f); });
     c.appendChild(g); v.appendChild(c);
   } else if (tab === 'Users') {
+    const roleOpts = (S.roles || []).filter(r => r.v !== 'owner');
     topBtn('+ Add user', () => openForm('Add user', [
       { key: 'mobile', label: 'Mobile number (login)', type: 'tel', value: '' },
       { key: 'name', label: 'Name', type: 'text', value: '' },
       { key: 'password', label: 'Password', type: 'text', value: '' },
-      { key: 'role', label: 'Role', type: 'select', options: [{ v: 'staff', t: 'Staff (data entry)' }, { v: 'admin', t: 'Admin (full firm access)' }], value: 'staff' },
+      { key: 'role', label: 'Role', type: 'select', options: roleOpts, value: 'attendant' },
     ], async d => { if (!d.mobile || !d.password) { alert('Mobile number and password are required'); return false; } await API.addUser(d.mobile.trim(), d.name.trim(), d.password, d.role); toast('User created'); renderUsersList(); }));
     const c = el('div', { class: 'card' });
-    c.innerHTML = `<div class="card-head"><h3>Users of ${esc((S.user || {}).firmName || 'this firm')}</h3></div><div class="hint">Users sign in with their <b>mobile number</b> and password. You are <b>${esc((S.user || {}).name || (S.user || {}).mobile || '')}</b> (${esc((S.user || {}).role || '')}).</div><div id="usersList" class="hint">Loading…</div>`;
+    c.innerHTML = `<div class="card-head"><h3>Users of ${esc((S.user || {}).firmName || 'this pump')}</h3></div><div class="hint">Users sign in with their <b>mobile number</b> and password. Roles limit what each person can do. You are <b>${esc((S.user || {}).name || (S.user || {}).mobile || '')}</b> (${esc(roleLabel((S.user || {}).role))}).</div><div id="usersList" class="hint">Loading…</div>`;
     v.appendChild(c); renderUsersList();
-  } else if (tab === 'Firms') {
-    topBtn('+ Add firm', () => openForm('Add petrol-pump firm', [
-      { key: 'name', label: 'Firm / station name', type: 'text', value: '', wide: true },
+  } else if (tab === 'Pumps') {
+    topBtn('+ Add pump', () => openForm('Add petrol pump', [
+      { key: 'name', label: 'Pump / station name', type: 'text', value: '', wide: true },
       { key: 'code', label: 'Dealer code (optional)', type: 'text', value: '' },
-      { key: 'adminMobile', label: 'Firm admin mobile (login)', type: 'tel', value: '' },
-      { key: 'adminPassword', label: 'Firm admin password', type: 'text', value: '' },
+      { key: 'adminMobile', label: 'Pump admin mobile (login)', type: 'tel', value: '' },
+      { key: 'adminPassword', label: 'Pump admin password', type: 'text', value: '' },
     ], async d => {
-      if (!d.name || !d.adminMobile || !d.adminPassword) { alert('Firm name, admin mobile and password are required'); return false; }
+      if (!d.name || !d.adminMobile || !d.adminPassword) { alert('Pump name, admin mobile and password are required'); return false; }
       await API.addFirm({ name: d.name.trim(), code: d.code.trim(), adminMobile: d.adminMobile.trim(), adminPassword: d.adminPassword });
-      S.firms = await API.listFirms(); toast('Firm created'); render();
+      S.firms = await API.listFirms(); toast('Pump created'); render();
     }));
     const c = el('div', { class: 'card' });
-    c.innerHTML = `<div class="card-head"><h3>Petrol-pump firms</h3></div><div class="hint">Each firm is a fully isolated instance with its own data, staff, customers and alerts. Add a firm here and share the admin mobile/password — that person signs in and sees only their firm.</div>`;
-    const rows = (S.firms || []).map(f => ({ name: f.name, code: f.code || '—', created: (f.created_at || '').slice(0, 10) }));
-    c.appendChild(table([{ label: 'Firm', val: r => r.name }, { label: 'Code', val: r => r.code }, { label: 'Created', val: r => r.created }], rows, { empty: 'No firms yet.' }));
+    c.innerHTML = `<div class="card-head"><h3>Petrol pumps</h3></div><div class="hint">Each pump is fully isolated — its own data, staff, customers and alerts. Add a pump and share the admin mobile/password. Use <b>Open</b> to view/support any pump; the pump admin signs in and sees only theirs.</div><div id="pumpsBody" class="hint">Loading…</div>`;
     v.appendChild(c);
+    API.overview().then(ov => {
+      const box = $('#pumpsBody'); box.innerHTML = '';
+      const wrap = el('div', { class: 'tbl-wrap' }); const t = el('table');
+      t.innerHTML = '<thead><tr><th>Pump</th><th>Code</th><th class="num">Users</th><th class="num">Entries</th><th class="num">Today ₹</th><th class="num">Outstanding ₹</th><th></th></tr></thead>';
+      const tb = el('tbody');
+      ov.forEach(p => {
+        const tr = el('tr');
+        tr.appendChild(el('td', {}, esc(p.name)));
+        tr.appendChild(el('td', {}, esc(p.code || '—')));
+        tr.appendChild(el('td', { class: 'num' }, p.users));
+        tr.appendChild(el('td', { class: 'num' }, p.entries));
+        tr.appendChild(el('td', { class: 'num' }, fmt(p.todaySale)));
+        tr.appendChild(el('td', { class: 'num' }, fmt(p.outstanding)));
+        const ac = el('td');
+        if (p.id !== (S.user || {}).firmId) { const b = el('button', { class: 'btn sm' }, 'Open'); b.onclick = () => openPump(p.id); ac.appendChild(b); }
+        else ac.appendChild(el('span', { class: 'tag' }, 'current'));
+        tr.appendChild(ac); tb.appendChild(tr);
+      });
+      t.appendChild(tb); wrap.appendChild(t); box.appendChild(wrap);
+    }).catch(e => { const box = $('#pumpsBody'); if (box) box.textContent = e.message; });
   }
 };
+async function openPump(firmId) {
+  try {
+    const r = await API.impersonate(firmId);
+    if (!localStorage.getItem('afs_home_token')) localStorage.setItem('afs_home_token', API.token);
+    API.token = r.token; localStorage.setItem('afs_token', r.token);
+    current = 'dashboard'; await boot(); toast('Viewing ' + r.firmName);
+  } catch (e) { alert(e.message); }
+}
 async function renderUsersList() {
   const box = $('#usersList'); if (!box) return;
   try {
@@ -1018,16 +1172,22 @@ const App = {
     fr.readAsText(f); ev.target.value = '';
   },
   async clearData() {
-    if (!confirm('Clear ALL transactional data (keeps master data: products, pumps, staff, customers)? Export a backup first.')) return;
+    const typed = prompt('This permanently deletes ALL transactional data (sales, credit, cash, expenses, shifts, attendance…). Master data is kept.\n\nExport a backup first. To confirm, type DELETE below:');
+    if (typed !== 'DELETE') { if (typed !== null) alert('Not cleared — you must type DELETE exactly.'); return; }
     try { await API.clearData(); S = normalize(await API.getState()); go('dashboard'); toast('Data cleared'); }
-    catch (e) { alert(e.message.includes('permission') ? 'Only an admin can clear data.' : e.message); }
+    catch (e) { alert(/permission/i.test(e.message) ? 'Only the owner or pump admin can clear data.' : e.message); }
   },
   closeModal,
 };
 
 function mountUser() {
   const u = API.user || {}; const label = u.name || u.mobile || '?'; const initial = label[0].toUpperCase();
-  $('#userChip').innerHTML = `<div class="av">${esc(initial)}</div><div><div>${esc(label)}</div><div class="role">${esc(u.role || '')}</div></div>`;
+  $('#userChip').innerHTML = `<div class="av">${esc(initial)}</div><div><div>${esc(label)}</div><div class="role">${esc(roleLabel(u.role))}</div></div>`;
+  // backup safety: Restore = owner only; Clear = owner/admin
+  const role = u.role;
+  const rb = $('#btnRestore'), cb = $('#btnClear');
+  if (rb) rb.style.display = role === 'owner' ? '' : 'none';
+  if (cb) cb.style.display = (role === 'owner' || role === 'admin') ? '' : 'none';
 }
 function showLogin(msg) { $('#appRoot').style.display = 'none'; $('#authOverlay').classList.add('show'); $('#loginErr').textContent = msg || ''; setTimeout(() => $('#loginUser').focus(), 50); }
 function hideLogin() { $('#authOverlay').classList.remove('show'); $('#appRoot').style.display = ''; }
@@ -1049,7 +1209,7 @@ async function boot() {
   $('#loginForm').addEventListener('submit', async e => {
     e.preventDefault(); $('#loginErr').textContent = 'Signing in…';
     try { await API.login($('#loginUser').value.trim(), $('#loginPass').value); await boot(); }
-    catch (err) { $('#loginErr').textContent = err.message === 'unauthorized' ? 'Invalid username or password' : err.message; }
+    catch (err) { $('#loginErr').textContent = err.message === 'unauthorized' ? 'Invalid mobile number or password' : err.message; }
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
   $('#modalBack').addEventListener('click', e => { if (e.target.id === 'modalBack') closeModal(); });

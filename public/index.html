@@ -34,9 +34,9 @@
     <nav class="nav" id="nav"></nav>
     <div class="foot">
       <button class="btn sm ghost" onclick="App.exportData()">⬇ Backup (JSON)</button>
-      <button class="btn sm ghost" onclick="document.getElementById('importFile').click()">⬆ Restore</button>
+      <button class="btn sm ghost" id="btnRestore" onclick="document.getElementById('importFile').click()">⬆ Restore</button>
       <input type="file" id="importFile" accept=".json" hidden onchange="App.importData(event)">
-      <button class="btn sm danger" onclick="App.clearData()">↺ Clear all data</button>
+      <button class="btn sm danger" id="btnClear" onclick="App.clearData()">↺ Clear all data</button>
       <button class="btn sm ghost" onclick="API.logout()">⎋ Sign out</button>
     </div>
   </aside>

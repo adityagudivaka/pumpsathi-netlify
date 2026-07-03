@@ -42,4 +42,7 @@ const API = {
 
   alertTest(type, date) { return this.req('POST', '/alerts/test', { type, date }); },
   alertRecent() { return this.req('GET', '/alerts/recent'); },
+  audit() { return this.req('GET', '/audit'); },
+  overview() { return this.req('GET', '/admin/overview'); },
+  impersonate(firmId) { return this.req('POST', '/admin/impersonate', { firmId }); },
 };
