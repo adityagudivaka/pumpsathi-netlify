@@ -41,11 +41,15 @@
     </div>
   </aside>
 
+  <div class="nav-scrim" id="navScrim" onclick="document.querySelector('.app').classList.remove('nav-open')"></div>
   <div class="main">
     <div class="topbar">
-      <div>
-        <h1 id="viewTitle">Dashboard</h1>
-        <div class="sub" id="viewSub"></div>
+      <div style="display:flex;align-items:center;gap:12px;min-width:0">
+        <button class="hamburger" id="hamburger" aria-label="Menu">☰</button>
+        <div style="min-width:0">
+          <h1 id="viewTitle">Dashboard</h1>
+          <div class="sub" id="viewSub"></div>
+        </div>
       </div>
       <div style="display:flex;align-items:center;gap:12px">
         <div id="topActions" style="display:flex;gap:8px"></div>
